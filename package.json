@@ -5,7 +5,7 @@
   "main": "src/index.ts",
   "type": "module",
   "bin": {
-    "daily-news": "./build/index.js"
+    "daily-news": "build/index.js"
   },
   "files": [
     "build"
