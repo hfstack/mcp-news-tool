@@ -1,0 +1,32 @@
+{
+  "name": "daily-news",
+  "version": "0.1.0",
+  "description": "新闻获取MCP服务器",
+  "main": "src/index.ts",
+  "type": "module",
+  "bin": {
+    "daily-news": "./build/index.js"
+  },
+  "files": [
+    "build"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepare": "npm run build",
+    "watch": "tsc --watch",
+    "inspector": "npx -y @modelcontextprotocol/inspector build/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.15.0",
+    "node-fetch": "^3.3.2",
+    "winston": "^3.17.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/node-fetch": "^2.6.10",
+    "nodemon": "^3.0.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  }
+}
