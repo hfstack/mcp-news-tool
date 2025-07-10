@@ -214,8 +214,14 @@ server.registerResource(
 server.tool(
   "search_news",
   {
-    category: z.number().optional().describe("新闻分类ID: 1=汽车行业, 2=AI技术, 4=热门新闻"),
-    date: z.string().optional().describe("日期格式 YYYY-MM-DD"),
+    category: z.number().default(1).describe("新闻分类ID: 1=汽车行业, 2=AI技术, 4=热门新闻"),
+    date: z.string().optional().describe("日期格式 YYYY-MM-DD").default(() => {
+      const today = new Date();
+      const year = today.getFullYear();
+      const month = String(today.getMonth() + 1).padStart(2, '0');
+      const day = String(today.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }),
   },
   async ({ category, date }) => {
     try {
@@ -268,10 +274,8 @@ server.tool(
  */
 server.tool(
   "get_latest_news",
-  {
-    count: z.number().default(3).describe("每个分类获取的新闻数量"),
-  },
-  async ({ count }) => {
+  {},
+  async () => {
     try {
       const allResults: string[] = [];
       
@@ -279,7 +283,7 @@ server.tool(
         try {
           const response = await fetchNews(Number(categoryId));
           
-          const newsItems = response.data.slice(0, count).map(news => {
+          const newsItems = response.data.map(news => {
             return `  - ${news.title} (${news.news_time})`;
           }).join("\n");
           
