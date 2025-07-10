@@ -39,9 +39,9 @@ type Pagination = {
 };
 
 /**
- * API响应类型
+ * API成功响应类型
  */
-type ApiResponse = {
+type ApiSuccessResponse = {
   code: number;
   data: News[];
   pagination: Pagination;
@@ -51,6 +51,21 @@ type ApiResponse = {
     per_page: number;
   };
 };
+
+/**
+ * API错误响应类型
+ */
+type ApiErrorResponse = {
+  code: number;
+  error: string;
+  timestamp: string;
+  path: string;
+};
+
+/**
+ * API响应联合类型
+ */
+type ApiResponse = ApiSuccessResponse | ApiErrorResponse;
 
 /**
  * 分类名称映射
@@ -71,6 +86,7 @@ const API_BASE_URL = "http://116.62.41.253:6060/api/news";
  */
 async function fetchNews(category?: number, date?: string, retries = 3): Promise<ApiResponse> {
   let lastError: Error | null = null;
+  let requestPath = '';
   
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
@@ -84,6 +100,7 @@ async function fetchNews(category?: number, date?: string, retries = 3): Promise
         url += category ? `&date=${date}` : `?date=${date}`;
       }
       
+      requestPath = url.replace(API_BASE_URL, '');
       console.log(`尝试第 ${attempt} 次请求: ${url}`);
       
       const controller = new AbortController();
@@ -93,24 +110,36 @@ async function fetchNews(category?: number, date?: string, retries = 3): Promise
         signal: controller.signal,
         headers: {
           'Accept': 'application/json',
-          'User-Agent': 'Daily-News-Client/1.0'
+          'User-Agent': 'Daily-News-Client/1.0',
+          'Connection': 'keep-alive',
+          'Cache-Control': 'no-cache'
         }
       });
       
       clearTimeout(timeout);
       
-      if (!response.ok) {
-        throw new Error(`API请求失败: ${response.status} ${response.statusText}`);
-      }
+      const data = await response.json() as any;
       
-      const data = await response.json();
+      if (!response.ok) {
+        return {
+          code: response.status,
+          error: data.message || `API请求失败: ${response.status} ${response.statusText}`,
+          timestamp: new Date().toISOString(),
+          path: requestPath
+        };
+      }
       
       // 验证响应数据结构
       if (!data || typeof data !== 'object' || !('data' in data) || !Array.isArray((data as any).data)) {
-        throw new Error('API响应格式错误: 无效的数据结构');
+        return {
+          code: 500,
+          error: 'API响应格式错误: 无效的数据结构',
+          timestamp: new Date().toISOString(),
+          path: requestPath
+        };
       }
       
-      return data as ApiResponse;
+      return data as ApiSuccessResponse;
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
       console.error(`请求失败 (尝试 ${attempt}/${retries}):`, lastError.message);
@@ -128,8 +157,32 @@ async function fetchNews(category?: number, date?: string, retries = 3): Promise
     }
   }
   
-  throw lastError || new Error('未知错误');
+  // 所有重试都失败后返回错误响应
+  return {
+    code: 500,
+    error: lastError?.message || '未知错误',
+    timestamp: new Date().toISOString(),
+    path: requestPath
+  };
 }
+
+/**
+ * 检查API响应是否成功
+ */
+function isSuccessResponse(response: ApiResponse): response is ApiSuccessResponse {
+  return 'data' in response && Array.isArray(response.data);
+}
+
+/**
+ * 处理新闻列表的函数
+ */
+function processNewsData(response: ApiResponse): News[] {
+  if (isSuccessResponse(response)) {
+    return response.data;
+  }
+  return [];
+}
+
 /**
  * 创建MCP服务器
  */
@@ -189,8 +242,9 @@ const newsTemplate = new ResourceTemplate("news:///articles/{id}", {
     for (const categoryId of Object.keys(categoryMap)) {
       try {
         const response = await fetchNews(Number(categoryId));
+        const newsData = processNewsData(response);
         
-        const categoryNews = response.data.slice(0, 5).map(news => ({
+        const categoryNews = newsData.slice(0, 5).map(news => ({
           uri: `news:///articles/${news.id}`,
           mimeType: "text/plain",
           name: news.title,
@@ -226,8 +280,9 @@ server.registerResource(
       try {
         // 尝试获取数据以提高找到目标新闻的概率
         const response = await fetchNews(Number(categoryId));
+        const newsData = processNewsData(response);
         
-        const found = response.data.find(news => news.id === Number(id));
+        const found = newsData.find(news => news.id === Number(id));
         if (found) {
           targetNews = found;
           break;
@@ -270,15 +325,25 @@ server.tool(
     try {
       const response = await fetchNews(category, date);
       const categoryName = categoryMap[category] || "未知分类";
+      const newsData = processNewsData(response);
       
-      const newsText = response.data.map(news => 
+      if (!isSuccessResponse(response)) {
+        return {
+          content: [{
+            type: "text",
+            text: `查询失败: ${response.error}`
+          }]
+        };
+      }
+      
+      const newsText = newsData.map(news => 
         `标题: ${news.title}\n内容: ${news.content}\n来源: ${news.source}\n时间: ${news.news_time}\n链接: ${news.url}\n`
       ).join("\n---\n\n");
       
       return {
         content: [{
           type: "text",
-          text: `查询结果:\n\n分类: ${categoryName} (ID: ${category})\n日期: ${date}\n\n总条数: ${response.data.length}\n\n${newsText}`
+          text: `查询结果:\n\n分类: ${categoryName} (ID: ${category})\n日期: ${date}\n\n总条数: ${newsData.length}\n\n${newsText}`
         }]
       };
     } catch (error) {
@@ -324,10 +389,20 @@ server.tool(
         Object.entries(categoryMap).map(async ([categoryId]) => {
           try {
             const response = await fetchNews(Number(categoryId), today);
+            const newsData = processNewsData(response);
+            
+            if (!isSuccessResponse(response)) {
+              return {
+                categoryId: Number(categoryId),
+                categoryName: categoryMap[Number(categoryId)],
+                error: response.error
+              };
+            }
+            
             return {
               categoryId: Number(categoryId),
               categoryName: categoryMap[Number(categoryId)],
-              news: response.data
+              news: newsData
             };
           } catch (error) {
             return {
