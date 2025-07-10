@@ -6,7 +6,7 @@
  * - 将新闻列为资源
  * - 读取单个新闻
  * - 获取不同分类的新闻
- * - 支持日期筛选和分页功能
+ * - 支持日期筛选功能
  */
 
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -69,15 +69,15 @@ const API_BASE_URL = "http://116.62.41.253:6060/api/news";
 /**
  * 获取新闻数据的函数
  */
-async function fetchNews(category?: number, date?: string, page: number = 1, per_page: number = 10): Promise<ApiResponse> {
-  let url = `${API_BASE_URL}?page=${page}&per_page=${per_page}`;
+async function fetchNews(category?: number, date?: string): Promise<ApiResponse> {
+  let url = `${API_BASE_URL}`;
   
   if (category) {
-    url += `&category=${category}`;
+    url += `?category=${category}`;
   }
   
   if (date) {
-    url += `&date=${date}`;
+    url += category ? `&date=${date}` : `?date=${date}`;
   }
   
   const response = await fetch(url);
@@ -87,7 +87,6 @@ async function fetchNews(category?: number, date?: string, page: number = 1, per
   
   return await response.json() as ApiResponse;
 }
-
 /**
  * 创建MCP服务器
  */
@@ -139,16 +138,16 @@ server.registerResource(
 
 // 创建新闻资源模板
 const newsTemplate = new ResourceTemplate("news:///articles/{id}", {
-  // 列出所有新闻资源（默认获取每个分类的最新10条）
+  // 列出所有新闻资源（默认获取每个分类的最新条目）
   list: async () => {
     const allNews: { uri: string; mimeType: string; name: string; description: string }[] = [];
     
-    // 获取每个分类的第一页新闻
+    // 获取每个分类的新闻
     for (const categoryId of Object.keys(categoryMap)) {
       try {
-        const response = await fetchNews(Number(categoryId), undefined, 1, 5);
+        const response = await fetchNews(Number(categoryId));
         
-        const categoryNews = response.data.map(news => ({
+        const categoryNews = response.data.slice(0, 5).map(news => ({
           uri: `news:///articles/${news.id}`,
           mimeType: "text/plain",
           name: news.title,
@@ -164,7 +163,6 @@ const newsTemplate = new ResourceTemplate("news:///articles/{id}", {
     return { resources: allNews };
   },
 });
-
 // 注册新闻资源
 server.registerResource(
   "news",
@@ -183,8 +181,8 @@ server.registerResource(
     
     for (const categoryId of Object.keys(categoryMap)) {
       try {
-        // 尝试获取更多数据以提高找到目标新闻的概率
-        const response = await fetchNews(Number(categoryId), undefined, 1, 20);
+        // 尝试获取数据以提高找到目标新闻的概率
+        const response = await fetchNews(Number(categoryId));
         
         const found = response.data.find(news => news.id === Number(id));
         if (found) {
@@ -218,23 +216,21 @@ server.tool(
   {
     category: z.number().optional().describe("新闻分类ID: 1=汽车行业, 2=AI技术, 4=热门新闻"),
     date: z.string().optional().describe("日期格式 YYYY-MM-DD"),
-    page: z.number().default(1).describe("页码"),
-    per_page: z.number().default(10).describe("每页数量"),
   },
-  async ({ category, date, page, per_page }) => {
+  async ({ category, date }) => {
     try {
-      const response = await fetchNews(category, date, page, per_page);
+      const response = await fetchNews(category, date);
       
       const newsItems = response.data.map(news => {
         return `- 标题: ${news.title}\n  分类: ${categoryMap[news.category]}\n  时间: ${news.news_time}\n  来源: ${news.source}\n  ID: ${news.id}\n`;
       }).join("\n");
       
-      const paginationInfo = `页码: ${response.pagination.current_page}/${response.pagination.total_pages}, 总条数: ${response.pagination.total_count}`;
+      const totalCount = `总条数: ${response.data.length}`;
       
       return {
         content: [{
           type: "text",
-          text: `查询结果:\n\n${newsItems}\n${paginationInfo}`
+          text: `查询结果:\n\n${newsItems}\n${totalCount}`
         }]
       };
     } catch (error) {
@@ -247,7 +243,6 @@ server.tool(
     }
   }
 );
-
 /**
  * 注册获取分类列表工具
  */
@@ -282,9 +277,9 @@ server.tool(
       
       for (const [categoryId, categoryName] of Object.entries(categoryMap)) {
         try {
-          const response = await fetchNews(Number(categoryId), undefined, 1, count);
+          const response = await fetchNews(Number(categoryId));
           
-          const newsItems = response.data.map(news => {
+          const newsItems = response.data.slice(0, count).map(news => {
             return `  - ${news.title} (${news.news_time})`;
           }).join("\n");
           
@@ -323,4 +318,4 @@ async function main() {
 main().catch((error) => {
   console.error("服务器错误:", error);
   process.exit(1);
-}); 
+});
