@@ -1,6 +1,6 @@
 {
   "name": "daily-news-mcp",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "新闻获取MCP服务器",
   "main": "src/index.ts",
   "type": "module",
