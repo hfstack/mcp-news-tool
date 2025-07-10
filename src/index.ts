@@ -69,23 +69,66 @@ const API_BASE_URL = "http://116.62.41.253:6060/api/news";
 /**
  * 获取新闻数据的函数
  */
-async function fetchNews(category?: number, date?: string): Promise<ApiResponse> {
-  let url = `${API_BASE_URL}`;
+async function fetchNews(category?: number, date?: string, retries = 3): Promise<ApiResponse> {
+  let lastError: Error | null = null;
   
-  if (category) {
-    url += `?category=${category}`;
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      let url = `${API_BASE_URL}`;
+      
+      if (category) {
+        url += `?category=${category}`;
+      }
+      
+      if (date) {
+        url += category ? `&date=${date}` : `?date=${date}`;
+      }
+      
+      console.log(`尝试第 ${attempt} 次请求: ${url}`);
+      
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000); // 5秒超时
+      
+      const response = await fetch(url, {
+        signal: controller.signal,
+        headers: {
+          'Accept': 'application/json',
+          'User-Agent': 'Daily-News-Client/1.0'
+        }
+      });
+      
+      clearTimeout(timeout);
+      
+      if (!response.ok) {
+        throw new Error(`API请求失败: ${response.status} ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      
+      // 验证响应数据结构
+      if (!data || typeof data !== 'object' || !('data' in data) || !Array.isArray((data as any).data)) {
+        throw new Error('API响应格式错误: 无效的数据结构');
+      }
+      
+      return data as ApiResponse;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      console.error(`请求失败 (尝试 ${attempt}/${retries}):`, lastError.message);
+      
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.error('请求超时');
+      }
+      
+      // 如果不是最后一次尝试，等待后重试
+      if (attempt < retries) {
+        const delay = attempt * 1000; // 递增延迟
+        console.log(`等待 ${delay}ms 后重试...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
   }
   
-  if (date) {
-    url += category ? `&date=${date}` : `?date=${date}`;
-  }
-  
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`API请求失败: ${response.status} ${response.statusText}`);
-  }
-  
-  return await response.json() as ApiResponse;
+  throw lastError || new Error('未知错误');
 }
 /**
  * 创建MCP服务器
@@ -226,19 +269,23 @@ server.tool(
   async ({ category, date }) => {
     try {
       const response = await fetchNews(category, date);
+      const categoryName = categoryMap[category] || "未知分类";
+      
+      const newsText = response.data.map(news => 
+        `标题: ${news.title}\n内容: ${news.content}\n来源: ${news.source}\n时间: ${news.news_time}\n链接: ${news.url}\n`
+      ).join("\n---\n\n");
+      
       return {
         content: [{
-          type: "json",
-          json: response
+          type: "text",
+          text: `查询结果:\n\n分类: ${categoryName} (ID: ${category})\n日期: ${date}\n\n总条数: ${response.data.length}\n\n${newsText}`
         }]
       };
     } catch (error) {
       return {
         content: [{
-          type: "json",
-          json: {
-            error: error instanceof Error ? error.message : String(error)
-          }
+          type: "text",
+          text: `查询失败: ${error instanceof Error ? error.message : String(error)}`
         }]
       };
     }
@@ -280,7 +327,7 @@ server.tool(
             return {
               categoryId: Number(categoryId),
               categoryName: categoryMap[Number(categoryId)],
-              news: response
+              news: response.data
             };
           } catch (error) {
             return {
@@ -292,22 +339,39 @@ server.tool(
         })
       );
       
+      let text = `各分类最新新闻:\n\n`;
+      
+      for (const result of results) {
+        text += `${result.categoryName} (ID: ${result.categoryId}):\n\n`;
+        
+        if ('error' in result) {
+          text += `获取失败 - ${result.error}\n\n`;
+        } else if (result.news.length === 0) {
+          text += `暂无新闻\n\n`;
+        } else {
+          result.news.forEach(news => {
+            text += `标题: ${news.title}\n`;
+            text += `内容: ${news.content}\n`;
+            text += `来源: ${news.source}\n`;
+            text += `时间: ${news.news_time}\n`;
+            text += `链接: ${news.url}\n\n`;
+          });
+        }
+        
+        text += `---\n\n`;
+      }
+      
       return {
         content: [{
-          type: "json",
-          json: {
-            date: today,
-            categories: results
-          }
+          type: "text",
+          text: text.trim()
         }]
       };
     } catch (error) {
       return {
         content: [{
-          type: "json",
-          json: {
-            error: error instanceof Error ? error.message : String(error)
-          }
+          type: "text",
+          text: `获取新闻失败: ${error instanceof Error ? error.message : String(error)}`
         }]
       };
     }
