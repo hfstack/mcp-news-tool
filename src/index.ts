@@ -209,10 +209,10 @@ server.registerResource(
 );
 
 /**
- * 注册获取分类新闻工具
+ * 注册获取指定分类和日期的新闻工具
  */
 server.tool(
-  "search_news",
+  "get_category_news",
   {
     category: z.number().default(1).describe("新闻分类ID: 1=汽车行业, 2=AI技术, 4=热门新闻"),
     date: z.string().optional().describe("日期格式 YYYY-MM-DD").default(() => {
@@ -226,24 +226,19 @@ server.tool(
   async ({ category, date }) => {
     try {
       const response = await fetchNews(category, date);
-      
-      const newsItems = response.data.map(news => {
-        return `- 标题: ${news.title}\n  分类: ${categoryMap[news.category]}\n  时间: ${news.news_time}\n  来源: ${news.source}\n  ID: ${news.id}\n`;
-      }).join("\n");
-      
-      const totalCount = `总条数: ${response.data.length}`;
-      
       return {
         content: [{
-          type: "text",
-          text: `查询结果:\n\n${newsItems}\n${totalCount}`
+          type: "json",
+          json: response
         }]
       };
     } catch (error) {
       return {
         content: [{
-          type: "text",
-          text: `获取新闻失败: ${error instanceof Error ? error.message : String(error)}`
+          type: "json",
+          json: {
+            error: error instanceof Error ? error.message : String(error)
+          }
         }]
       };
     }
@@ -277,33 +272,42 @@ server.tool(
   {},
   async () => {
     try {
-      const allResults: string[] = [];
-      
-      for (const [categoryId, categoryName] of Object.entries(categoryMap)) {
-        try {
-          const response = await fetchNews(Number(categoryId));
-          
-          const newsItems = response.data.map(news => {
-            return `  - ${news.title} (${news.news_time})`;
-          }).join("\n");
-          
-          allResults.push(`${categoryName} (ID: ${categoryId}):\n${newsItems}`);
-        } catch (error) {
-          allResults.push(`${categoryName} (ID: ${categoryId}): 获取失败 - ${error instanceof Error ? error.message : String(error)}`);
-        }
-      }
+      const today = new Date().toISOString().split('T')[0];
+      const results = await Promise.all(
+        Object.entries(categoryMap).map(async ([categoryId]) => {
+          try {
+            const response = await fetchNews(Number(categoryId), today);
+            return {
+              categoryId: Number(categoryId),
+              categoryName: categoryMap[Number(categoryId)],
+              news: response
+            };
+          } catch (error) {
+            return {
+              categoryId: Number(categoryId),
+              categoryName: categoryMap[Number(categoryId)],
+              error: error instanceof Error ? error.message : String(error)
+            };
+          }
+        })
+      );
       
       return {
         content: [{
-          type: "text",
-          text: `各分类最新新闻:\n\n${allResults.join("\n\n")}`
+          type: "json",
+          json: {
+            date: today,
+            categories: results
+          }
         }]
       };
     } catch (error) {
       return {
         content: [{
-          type: "text",
-          text: `获取最新新闻失败: ${error instanceof Error ? error.message : String(error)}`
+          type: "json",
+          json: {
+            error: error instanceof Error ? error.message : String(error)
+          }
         }]
       };
     }
