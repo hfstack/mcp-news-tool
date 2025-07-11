@@ -311,6 +311,7 @@ server.registerResource(
  */
 server.tool(
   "get_category_news",
+  "根据分类ID和日期获取新闻列表，支持按日期筛选新闻内容",
   {
     category: z.number().default(1).describe("新闻分类ID: 1=汽车行业, 2=AI技术, 4=热门新闻"),
     date: z.string().optional().describe("日期格式 YYYY-MM-DD").default(() => {
@@ -361,6 +362,7 @@ server.tool(
  */
 server.tool(
   "get_categories",
+  "获取所有可用的新闻分类列表，包括分类ID和名称",
   {},
   async () => {
     const categories = Object.entries(categoryMap).map(([id, name]) => {
@@ -381,6 +383,7 @@ server.tool(
  */
 server.tool(
   "get_latest_news",
+  "获取所有分类的最新新闻，自动获取每个分类的最新内容",
   {},
   async () => {
     try {
